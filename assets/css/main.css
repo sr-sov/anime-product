@@ -11,6 +11,19 @@
    one electric indigo, reserved for focus, the active palette row, and a single
    primary action per view (L1: accent ≤ 2×/screen).
    ──────────────────────────────────────────────────────────────────────── */
+/* Metric-adjusted fallback for Inter. Until InterVariable loads, text renders
+   in this Arial-derived face whose ascent/descent/size are overridden to match
+   Inter's box, so the eventual swap reflows nothing (kills the font-swap CLS on
+   the home content region). Listed before Inter in the Tailwind stack. */
+@font-face {
+  font-family: 'InterFallback';
+  src: local('Arial');
+  ascent-override: 90%;
+  descent-override: 22.43%;
+  line-gap-override: 0%;
+  size-adjust: 107.4%;
+}
+
 @layer base {
   :root {
     color-scheme: dark;

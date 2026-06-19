@@ -57,6 +57,9 @@ export default <Partial<Config>>{
         sans: [
           'InterVariable',
           'Inter',
+          // Metric-adjusted fallback (assets/css/main.css) — matches Inter's box
+          // so the font swap doesn't reflow text (no CLS).
+          'InterFallback',
           'ui-sans-serif',
           'system-ui',
           '-apple-system',
