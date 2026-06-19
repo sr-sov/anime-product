@@ -5,13 +5,12 @@
  * featured spotlight and curated rails (Top, This season, optionally Recent).
  * Everything lands fast and is one keystroke from anywhere via ⌘K.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useJikan } from '~/composables/useJikan'
 import { useCommandPalette } from '~/composables/useCommandPalette'
 import { useRecent } from '~/composables/useRecent'
 import { useFormat } from '~/composables/useFormat'
-import type { Anime } from '~/types/jikan'
 
 const router = useRouter()
 const route = useRoute()
@@ -20,19 +19,13 @@ const { open } = useCommandPalette()
 const { recent } = useRecent()
 const { score, year, compact } = useFormat()
 
-// Featured spotlight = the current #1 top title.
-const featured = ref<Anime | null>(null)
-const featuredState = ref<'loading' | 'ready' | 'error'>('loading')
-
-onMounted(async () => {
-  try {
-    const res = await getTopAnime(1)
-    featured.value = res.data[0] ?? null
-    featuredState.value = featured.value ? 'ready' : 'error'
-  } catch {
-    featuredState.value = 'error'
-  }
-})
+// Featured spotlight = the current #1 top title. Fetched hydration-safely so it
+// SERVER-RENDERS into the prerendered homepage HTML: no skeleton→content swap on
+// first paint (which was the mobile CLS source), and it doubles as the LCP hero.
+const { data: featured, pending: featuredPending, error: featuredError } = await useAsyncData(
+  'home-featured',
+  async () => (await getTopAnime(1)).data[0] ?? null,
+)
 
 // Rail fetchers (each rail loads independently).
 const loadTop = async () => (await getTopAnime(1)).data
@@ -119,8 +112,8 @@ const featuredSynopsis = computed(() =>
         </h2>
 
         <!-- Loading -->
-        <div v-if="featuredState === 'loading'" class="flex gap-5 rounded-2xl border border-line bg-panel p-5">
-          <div class="skeleton aspect-[3/4] w-36 shrink-0 rounded-lg sm:w-44" />
+        <div v-if="featuredPending && !featured" class="flex gap-5 rounded-2xl border border-line bg-panel p-5">
+          <div class="skeleton aspect-[3/4] w-32 shrink-0 rounded-lg sm:w-44" />
           <div class="flex-1 space-y-3 py-2">
             <div class="skeleton h-6 w-2/3 rounded" />
             <div class="skeleton h-3 w-1/3 rounded" />
@@ -130,13 +123,13 @@ const featuredSynopsis = computed(() =>
           </div>
         </div>
 
-        <p v-else-if="featuredState === 'error'" class="rounded-xl border border-dashed border-line px-4 py-8 text-sm text-fg-subtle">
+        <p v-else-if="featuredError || !featured" class="rounded-xl border border-dashed border-line px-4 py-8 text-sm text-fg-subtle">
           Couldn’t load the featured title right now.
         </p>
 
         <!-- Loaded -->
         <button
-          v-else-if="featured"
+          v-else
           type="button"
           class="group flex w-full gap-5 overflow-hidden rounded-2xl border border-line bg-panel p-5 text-left transition-colors hover:border-line-strong"
           @click="openFeatured"

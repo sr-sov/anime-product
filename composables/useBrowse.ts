@@ -100,8 +100,14 @@ export function useBrowse() {
     }
   }
 
-  // Refetch whenever the committed filters change.
-  watch(filters, fetchPage, { immediate: true, deep: true })
+  // Refetch whenever the committed filters change. Browse is an interactive,
+  // URL-driven surface that is NOT prerendered (only `/` + detail routes are),
+  // so the fetch is client-only: the server paints the skeleton, the client
+  // hydrates and loads. This avoids an SSR fetch whose ref-based result would
+  // not survive into the payload (the side-effect-ref hydration trap).
+  if (import.meta.client) {
+    watch(filters, fetchPage, { immediate: true, deep: true })
+  }
 
   // ── Setters write through the URL (single source of truth) ───────────────
   function patchQuery(patch: Record<string, string | undefined>, resetPage = true) {

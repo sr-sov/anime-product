@@ -56,19 +56,92 @@ export default defineNuxtConfig({
   nitro: {
     preset: 'github-pages',
     prerender: {
-      // Pre-render only the shell. Detail routes resolve client-side via the
-      // 404.html SPA fallback, so the build never depends on Jikan being up
-      // (and we don't burn build-time requests against its rate limit).
+      // Pre-render the homepage plus the top ~40 detail routes (the ids are
+      // seeded at build time by the hook below). crawlLinks stays OFF so the
+      // long tail of titles is NOT crawled — those resolve client-side via the
+      // 404.html SPA fallback. failOnError stays off so a flaky Jikan response
+      // on one route never fails the whole build.
       crawlLinks: false,
       routes: ['/'],
       failOnError: false,
+      // Render one route at a time with a gap between them. Each detail route
+      // makes a live Jikan call during SSR; Jikan rate-limits hard (~3 req/s),
+      // so serializing the prerender (instead of bursting 40 in parallel) is
+      // what lets every detail page bake REAL content instead of an error
+      // state. The in-fetcher backoff covers the occasional 429 on top.
+      concurrency: 1,
+      interval: 800,
     },
   },
 
-  // Data is fetched client-side from Jikan (composables/useJikan.ts); no server
-  // runtime needed at deploy time. The shell is pre-rendered for a fast first
-  // paint; dynamic routes hydrate against the live API via the SPA fallback.
-  ssr: false,
+  hooks: {
+    /**
+     * Seed the prerender queue with the top ~40 /anime/<id> routes. We fetch
+     * the top-anime feed at build time (rate-guarded, ~3 req/s) so the most
+     * popular titles ship as real prerendered HTML — deep-linkable, crawlable,
+     * with a server-painted cover. Failure is non-fatal: if Jikan is down at
+     * build, we simply prerender fewer (or zero) detail routes and the SPA
+     * fallback still covers them.
+     */
+    async 'prerender:routes'(ctx) {
+      const base = 'https://api.jikan.moe/v4'
+      const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+      // Fetch one page with a few retries — Jikan rate-limits the build-time
+      // seed too, so a single 429 must not blank the detail-route set.
+      async function topPage(page: number): Promise<number[]> {
+        for (let attempt = 0; attempt < 4; attempt++) {
+          try {
+            const res = await fetch(`${base}/top/anime?page=${page}&limit=25&sfw=true`)
+            if (res.status === 429) {
+              await sleep(1500 * (attempt + 1))
+              continue
+            }
+            if (!res.ok) return []
+            const json = (await res.json()) as { data?: Array<{ mal_id: number }> }
+            return (json.data ?? []).map((a) => a.mal_id)
+          } catch {
+            await sleep(1000 * (attempt + 1))
+          }
+        }
+        return []
+      }
+
+      const ids = new Set<number>()
+      for (const page of [1, 2]) {
+        for (const id of await topPage(page)) ids.add(id)
+        await sleep(900)
+      }
+
+      // Fallback: if Jikan was unreachable at build, seed a curated set of
+      // evergreen MAL ids so the build always ships real prerendered detail
+      // pages (deep-links + SEO) rather than an all-SPA long tail.
+      if (ids.size < 10) {
+        for (const id of [
+          52991, 5114, 9253, 28977, 38524, 11061, 9969, 15417, 4181, 2904,
+          41467, 51535, 31964, 32281, 19, 820, 918, 1535, 30276, 16498,
+        ]) {
+          ids.add(id)
+        }
+      }
+
+      let added = 0
+      for (const id of ids) {
+        if (added >= 40) break
+        ctx.routes.add(`/anime/${id}`)
+        added++
+      }
+      // eslint-disable-next-line no-console
+      console.log(`[prerender] seeded ${added} /anime/<id> detail routes`)
+    },
+  },
+
+  // SSR/SSG: pages are server-rendered at build time (prerendered to static
+  // HTML for GitHub Pages). The homepage and the seeded detail routes ship real
+  // server-painted markup; the long tail hydrates against the live API via the
+  // SPA fallback. Data must be fetched hydration-safely (useAsyncData), never
+  // via setup-time side effects.
+  ssr: true,
 
   typescript: {
     strict: true,

@@ -2,11 +2,14 @@
 /**
  * Full detail page — the standalone, deep-linkable view of one title (the
  * drawer's "open full page" target, and what a shared /anime/<id> URL renders).
- * Same data as the drawer, laid out full-width: a poster + meta sidebar, a
- * readable synopsis column, the trailer, and a recommendations grid. Explicit
- * loading / error states; recorded to recent history on view.
+ *
+ * SSR/SSG-safe: the title record is fetched with `useAsyncData`, whose RETURN
+ * value IS the data (no setup-time side effects, no window access in setup), so
+ * the top ~40 ids prerender to real HTML with a server-painted cover and
+ * per-title SEO. The long tail hydrates the same way via the SPA fallback.
+ * Recommendations are a secondary, client-only enhancement.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useJikan } from '~/composables/useJikan'
 import { useFormat } from '~/composables/useFormat'
@@ -21,44 +24,78 @@ const { push: pushRecent } = useRecent()
 
 const id = computed(() => String(route.params.id))
 
-type State = 'loading' | 'ready' | 'error'
-const state = ref<State>('loading')
-const anime = ref<Anime | null>(null)
-const recs = ref<RecommendationEntry[]>([])
-let token = 0
+// Hydration-safe data: useAsyncData returns the record itself. `data` is the
+// title, `error`/`pending` drive the explicit states. Keyed by id so navigating
+// between detail pages refetches cleanly.
+const { data: anime, pending, error, refresh } = await useAsyncData(
+  () => `anime-${id.value}`,
+  async () => (await getAnimeById(id.value)).data,
+  { watch: [id] },
+)
 
-async function load() {
-  const mine = ++token
-  state.value = 'loading'
-  anime.value = null
-  recs.value = []
-  try {
-    const res = await getAnimeById(id.value)
-    if (mine !== token) return
-    anime.value = res.data
-    state.value = 'ready'
+// Only surface the hard error state once a fetch has actually failed and
+// produced no data. Wrapped in <ClientOnly> in the template so the server
+// (prerender) never bakes an error into static HTML — an empty build-time fetch
+// degrades to the skeleton, which hydrates and retries.
+const hasError = computed(() => !pending.value && (Boolean(error.value) || !anime.value))
+// Exposed for the template (Vue's template compiler can't parse `import.meta`).
+const isClient = import.meta.client
+
+// If a prerendered page hydrated with no data (its build-time fetch was rate
+// limited), refetch once on the client so the skeleton resolves to content.
+onMounted(() => {
+  if (!anime.value && !pending.value) refresh()
+})
+
+// Recommendations + recent history are client-only side effects.
+const recs = ref<RecommendationEntry[]>([])
+
+watch(
+  anime,
+  (a) => {
+    if (!a || !import.meta.client) return
     pushRecent({
-      mal_id: res.data.mal_id,
-      title: res.data.title,
-      image: res.data.images?.jpg?.image_url ?? null,
-      score: res.data.score,
-      type: res.data.type,
-      year: year(res.data),
+      mal_id: a.mal_id,
+      title: a.title,
+      image: a.images?.jpg?.image_url ?? null,
+      score: a.score,
+      type: a.type,
+      year: year(a),
     })
-    getRecommendations(id.value)
+    recs.value = []
+    getRecommendations(a.mal_id)
       .then((r) => {
-        if (mine === token) recs.value = r.data.slice(0, 12)
+        recs.value = r.data.slice(0, 12)
       })
       .catch(() => {})
-  } catch {
-    if (mine !== token) return
-    state.value = 'error'
-  }
-}
+  },
+  { immediate: true },
+)
 
-watch(id, load, { immediate: true })
-
-useHead({ title: () => (anime.value ? `${anime.value.title} · Senkō` : 'Loading · Senkō') })
+// Per-title SEO off the API data — title, description, and the cover as the
+// og:image / twitter card so a shared /anime/<id> link unfurls correctly.
+const seoDescription = computed(() =>
+  ((anime.value?.synopsis ?? '').replace(/\s+/g, ' ').trim().slice(0, 200)) ||
+  'A title on Senkō, the keyboard-first anime index.',
+)
+const seoImage = computed(
+  () =>
+    anime.value?.images?.webp?.large_image_url ||
+    anime.value?.images?.jpg?.large_image_url ||
+    anime.value?.images?.jpg?.image_url ||
+    undefined,
+)
+useSeoMeta({
+  title: () => (anime.value ? `${anime.value.title} · Senkō` : 'Anime · Senkō'),
+  description: seoDescription,
+  ogTitle: () => (anime.value ? `${anime.value.title} · Senkō` : 'Senkō'),
+  ogDescription: seoDescription,
+  ogImage: seoImage,
+  ogType: 'video.tv_show',
+  twitterCard: 'summary_large_image',
+  twitterTitle: () => (anime.value ? anime.value.title : 'Senkō'),
+  twitterImage: seoImage,
+})
 
 const poster = computed(
   () =>
@@ -105,26 +142,8 @@ function openRec(rid: number) {
       Back
     </button>
 
-    <!-- Loading -->
-    <div v-if="state === 'loading'" class="grid gap-8 lg:grid-cols-[300px_1fr]">
-      <div class="space-y-3">
-        <div class="skeleton aspect-[3/4] w-full max-w-[300px] rounded-xl" />
-        <div class="skeleton h-24 w-full rounded-xl" />
-      </div>
-      <div class="space-y-3">
-        <div class="skeleton h-8 w-2/3 rounded" />
-        <div class="skeleton h-4 w-1/3 rounded" />
-        <div class="skeleton mt-6 h-3 w-full rounded" />
-        <div class="skeleton h-3 w-11/12 rounded" />
-        <div class="skeleton h-3 w-10/12 rounded" />
-      </div>
-    </div>
-
-    <!-- Error -->
-    <ErrorState v-else-if="state === 'error'" @retry="load" />
-
     <!-- Loaded -->
-    <article v-else-if="anime" class="grid gap-8 lg:grid-cols-[300px_1fr]">
+    <article v-if="anime" class="grid gap-8 lg:grid-cols-[300px_1fr]">
       <!-- Sidebar -->
       <aside class="space-y-4 lg:sticky lg:top-[calc(var(--header-h)+1.5rem)] lg:self-start">
         <div class="aspect-[3/4] w-full max-w-[300px] overflow-hidden rounded-xl border border-line-strong bg-bg-subtle shadow-panel">
@@ -247,5 +266,27 @@ function openRec(rid: number) {
         </section>
       </div>
     </article>
+
+    <!-- Loading. Also the SSR fallback when a prerender-time fetch came back
+         empty: we ship the skeleton (which hydrates and refetches on the client)
+         rather than baking a hard error into static HTML. -->
+    <div v-else-if="pending || !isClient" class="grid gap-8 lg:grid-cols-[300px_1fr]">
+      <div class="space-y-3">
+        <div class="skeleton aspect-[3/4] w-full max-w-[300px] rounded-xl" />
+        <div class="skeleton h-24 w-full rounded-xl" />
+      </div>
+      <div class="space-y-3">
+        <div class="skeleton h-8 w-2/3 rounded" />
+        <div class="skeleton h-4 w-1/3 rounded" />
+        <div class="skeleton mt-6 h-3 w-full rounded" />
+        <div class="skeleton h-3 w-11/12 rounded" />
+        <div class="skeleton h-3 w-10/12 rounded" />
+      </div>
+    </div>
+
+    <!-- Error — client-side only (ClientOnly), after a confirmed failed fetch. -->
+    <ClientOnly v-else>
+      <ErrorState v-if="hasError" @retry="() => refresh()" />
+    </ClientOnly>
   </div>
 </template>
