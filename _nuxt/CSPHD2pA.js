@@ -1,0 +1,1 @@
+import{a0 as s,a1 as u,a2 as r,a3 as o,S as c,a4 as i}from"./BIQVpERY.js";function n(t){const e=t||r();return e?.ssrContext?.head||e?.runWithContext(()=>{if(o())return c(i)})}function d(t,e={}){const a=n(e.nuxt);if(a)return s(t,{head:a,...e})}function f(t,e={}){const a=n(e.nuxt);if(a)return u(t,{head:a,...e})}export{f as a,d as u};
