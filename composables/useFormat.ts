@@ -1,4 +1,19 @@
-import type { Anime } from '~/types/jikan'
+import type { Anime, JikanImageSet } from '~/types/jikan'
+
+/**
+ * Build a responsive `srcset` from a Jikan image set. Jikan exposes three
+ * widths — small (~225px), default (~350px), large (~425px) — so the browser
+ * can pick the right one for the grid cell + DPR instead of always pulling the
+ * large file. Returns undefined when the set is too sparse to be useful.
+ */
+export function srcsetFrom(set: JikanImageSet | undefined): string | undefined {
+  if (!set) return undefined
+  const parts: string[] = []
+  if (set.small_image_url) parts.push(`${set.small_image_url} 225w`)
+  if (set.image_url) parts.push(`${set.image_url} 350w`)
+  if (set.large_image_url) parts.push(`${set.large_image_url} 425w`)
+  return parts.length > 1 ? parts.join(', ') : undefined
+}
 
 /**
  * Small presentation helpers shared by cards and the detail page. Kept as a

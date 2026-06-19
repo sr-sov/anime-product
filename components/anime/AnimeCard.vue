@@ -9,7 +9,7 @@
  * The whole tile is one focusable control; the image lazy-loads and reserves
  * its aspect ratio so the grid never shifts.
  */
-import { useFormat } from '~/composables/useFormat'
+import { useFormat, srcsetFrom } from '~/composables/useFormat'
 import type { Anime } from '~/types/jikan'
 
 const props = defineProps<{
@@ -28,6 +28,11 @@ const poster =
   props.anime.images?.jpg?.image_url ||
   ''
 
+// Responsive sources: prefer webp, fall back to jpg. The `sizes` mirrors the
+// grid (2 cols on phones → 6 on xl, container capped at 1320px).
+const srcset = srcsetFrom(props.anime.images?.webp) || srcsetFrom(props.anime.images?.jpg)
+const sizes = '(min-width:1280px) 210px, (min-width:1024px) 18vw, (min-width:768px) 23vw, (min-width:640px) 31vw, 47vw'
+
 const synopsis = (props.anime.synopsis ?? '').replace(/\s+/g, ' ').trim()
 </script>
 
@@ -42,6 +47,8 @@ const synopsis = (props.anime.synopsis ?? '').replace(/\s+/g, ' ').trim()
       <img
         v-if="poster"
         :src="poster"
+        :srcset="srcset"
+        :sizes="srcset ? sizes : undefined"
         :alt="`Cover art for ${anime.title}`"
         loading="lazy"
         decoding="async"
