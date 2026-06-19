@@ -26,11 +26,13 @@
     --line: oklch(0.3 0.008 264);
     --line-strong: oklch(0.37 0.01 264);
 
-    /* Ink. */
+    /* Ink. Every step clears WCAG AA (4.5:1) for body-sized text on the canvas
+       and panel surfaces — `--fg-faint` is the floor, lifted from a failing
+       3.82:1 to ~4.6:1 so 11px metadata and group headers stay legible. */
     --fg: oklch(0.97 0.004 264);
     --fg-muted: oklch(0.8 0.006 264);
     --fg-subtle: oklch(0.66 0.008 264);
-    --fg-faint: oklch(0.54 0.008 264);
+    --fg-faint: oklch(0.635 0.008 264);
 
     /* Electric accent + roles. */
     --accent: oklch(0.68 0.18 277);

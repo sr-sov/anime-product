@@ -7,7 +7,7 @@
  */
 import { onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { useFormat } from '~/composables/useFormat'
+import { useFormat, srcsetFrom } from '~/composables/useFormat'
 import type { Anime } from '~/types/jikan'
 
 const props = defineProps<{
@@ -72,7 +72,7 @@ function open(id: number) {
     <!-- Error -->
     <p v-else-if="state === 'error'" class="rounded-lg border border-dashed border-line px-4 py-6 text-sm text-fg-subtle">
       Couldn’t load this rail.
-      <button class="font-medium text-accent hover:underline" @click="run">Retry</button>
+      <button class="font-medium text-accent underline underline-offset-2" @click="run">Retry</button>
     </p>
 
     <!-- Loaded -->
@@ -93,6 +93,8 @@ function open(id: number) {
           <div class="relative aspect-[3/4] w-full overflow-hidden rounded-lg border border-line bg-bg-subtle transition-[transform,border-color] duration-200 ease-house group-hover:-translate-y-0.5 group-hover:border-line-strong group-focus-visible:-translate-y-0.5">
             <img
               :src="a.images?.webp?.large_image_url || a.images?.jpg?.image_url || ''"
+              :srcset="srcsetFrom(a.images?.webp) || srcsetFrom(a.images?.jpg)"
+              sizes="148px"
               :alt="`Cover art for ${a.title}`"
               loading="lazy"
               decoding="async"

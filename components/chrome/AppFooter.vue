@@ -14,7 +14,7 @@
           href="https://jikan.moe"
           target="_blank"
           rel="noopener"
-          class="text-fg-subtle underline-offset-2 hover:text-fg hover:underline"
+          class="text-fg-subtle underline underline-offset-2 transition-colors hover:text-fg"
           >Jikan</a
         >
         (MyAnimeList) API.

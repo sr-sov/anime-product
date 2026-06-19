@@ -62,8 +62,13 @@ const searchState = ref<SearchState>('idle')
 const searchResults = ref<Anime[]>([])
 let searchToken = 0
 
-watch(debounced, async (q) => {
-  const term = q.trim()
+/**
+ * Run the live search for a term. Extracted so the in-list error state can
+ * retry the exact same query without waiting for another keystroke. The token
+ * guard keeps a stale response (or a stale retry) from overwriting a newer one.
+ */
+async function runSearch(rawTerm: string) {
+  const term = rawTerm.trim()
   if (term.length < 2) {
     searchResults.value = []
     searchState.value = 'idle'
@@ -81,7 +86,14 @@ watch(debounced, async (q) => {
     searchResults.value = []
     searchState.value = 'error'
   }
-})
+}
+
+watch(debounced, (q) => runSearch(q))
+
+/** Retry the current query (from the in-list error state). */
+function retrySearch() {
+  runSearch(query.value)
+}
 
 // ── Result model ──────────────────────────────────────────────────────────
 // Every navigable row is normalised to a `Row` so selection/keyboard handling
@@ -293,9 +305,17 @@ watch(isOpen, (open) => {
 })
 
 const showSearchStatus = computed(
-  () => q.value.length >= 2 && (searchState.value === 'loading' || searchState.value === 'error'),
+  () => q.value.length >= 2 && searchState.value === 'loading',
 )
-const isEmpty = computed(() => flatRows.value.length === 0 && searchState.value !== 'loading')
+/** The live search failed AND nothing local matched — the list is bare. */
+const isSearchError = computed(() => searchState.value === 'error')
+/** Genuine no-results: a settled (non-error, non-loading) empty set. */
+const isEmpty = computed(
+  () =>
+    flatRows.value.length === 0 &&
+    searchState.value !== 'loading' &&
+    searchState.value !== 'error',
+)
 </script>
 
 <template>
@@ -325,8 +345,8 @@ const isEmpty = computed(() => flatRows.value.length === 0 && searchState.value 
               v-model="query"
               type="text"
               role="combobox"
-              aria-expanded="true"
-              aria-controls="palette-list"
+              :aria-expanded="flatRows.length > 0"
+              :aria-controls="flatRows.length > 0 ? 'palette-list' : undefined"
               :aria-activedescendant="flatRows[selected] ? `row-${flatRows[selected]!.key}` : undefined"
               autocomplete="off"
               autocorrect="off"
@@ -340,20 +360,19 @@ const isEmpty = computed(() => flatRows.value.length === 0 && searchState.value 
               class="flex items-center gap-1.5 text-2xs text-fg-faint"
               aria-live="polite"
             >
-              <AppIcon v-if="searchState === 'loading'" name="loader" :size="13" class="animate-spin" />
-              <span v-if="searchState === 'loading'">Searching</span>
-              <span v-else-if="searchState === 'error'" class="text-warn">Search failed</span>
+              <AppIcon name="loader" :size="13" class="animate-spin" />
+              <span>Searching</span>
             </div>
             <kbd v-else class="kbd">esc</kbd>
           </div>
 
-          <!-- Results -->
+          <!-- Results. tabindex makes the scroll region keyboard-operable
+               (axe scrollable-region-focusable); arrow keys still drive
+               selection from the input above. -->
           <div
-            id="palette-list"
             ref="listEl"
-            role="listbox"
-            aria-label="Results"
-            class="max-h-[min(420px,52vh)] overflow-y-auto overscroll-contain p-2"
+            tabindex="0"
+            class="max-h-[min(420px,52vh)] overflow-y-auto overscroll-contain p-2 focus:outline-none"
           >
             <!-- Empty -->
             <div
@@ -366,6 +385,28 @@ const isEmpty = computed(() => flatRows.value.length === 0 && searchState.value 
                 <span class="font-medium text-fg">“{{ q }}”</span>
               </p>
               <p class="text-xs text-fg-faint">Try a shorter query or a genre name.</p>
+            </div>
+
+            <!-- Search error + retry. Shown when the live anime query fails; any
+                 local command/genre/recent matches still render below it, so a
+                 dropped network call never blanks the whole palette. -->
+            <div
+              v-else-if="isSearchError"
+              class="mx-1 mb-2 mt-1 flex items-center gap-3 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2.5"
+              role="alert"
+            >
+              <AppIcon name="alert" :size="16" class="shrink-0 text-warn" />
+              <div class="min-w-0 flex-1">
+                <p class="text-sm font-medium text-fg">Search request failed</p>
+                <p class="text-xs text-fg-subtle">Jikan rate-limits aggressively — give it a second.</p>
+              </div>
+              <button
+                type="button"
+                class="shrink-0 rounded-md border border-line bg-bg-subtle px-2.5 py-1 text-xs font-medium text-fg-muted transition-colors hover:border-line-strong hover:text-fg"
+                @click="retrySearch"
+              >
+                Retry
+              </button>
             </div>
 
             <!-- Loading skeleton (first search, before any results) -->
@@ -383,83 +424,111 @@ const isEmpty = computed(() => flatRows.value.length === 0 && searchState.value 
               </div>
             </div>
 
-            <!-- Grouped result rows -->
-            <template v-else>
-              <section v-for="g in groupedRows" :key="g.group" class="mb-1 last:mb-0">
-                <h3
+            <!-- Grouped result rows.
+
+                 ARIA ownership chain: a dedicated role="listbox" wraps ONLY the
+                 groups (no empty/error/loading chrome leaks into it). Each section
+                 is a role="group" labelled by its header; the option rows are
+                 direct children of that group. This keeps the required
+                 listbox → group → option hierarchy valid (no orphaned options, no
+                 nested generic list between them). The header is a plain <div>
+                 (not an <h3>/<ul>) so it carries no implicit list/heading
+                 semantics that would break the group. -->
+            <div
+              v-if="flatRows.length > 0"
+              id="palette-list"
+              role="listbox"
+              aria-label="Results"
+            >
+              <div
+                v-for="g in groupedRows"
+                :key="g.group"
+                role="group"
+                :aria-labelledby="`palette-group-${g.group}`"
+                class="mb-1 last:mb-0"
+              >
+                <div
+                  :id="`palette-group-${g.group}`"
                   class="px-3 pb-1 pt-2 text-2xs font-semibold uppercase tracking-wider text-fg-faint"
                 >
                   {{ g.group }}
-                </h3>
-                <ul>
-                  <li
-                    v-for="row in g.rows"
-                    :id="`row-${row.key}`"
-                    :key="row.key"
-                    role="option"
-                    :aria-selected="flatIndexOf(row) === selected"
-                    :data-selected="flatIndexOf(row) === selected"
-                    class="group/row flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-100"
-                    :class="
-                      flatIndexOf(row) === selected
-                        ? 'bg-accent-bg text-fg'
-                        : 'text-fg-muted hover:bg-bg-subtle'
-                    "
-                    @mousemove="selectRow(flatIndexOf(row))"
-                    @click="row.perform()"
+                </div>
+                <div
+                  v-for="row in g.rows"
+                  :id="`row-${row.key}`"
+                  :key="row.key"
+                  role="option"
+                  :aria-selected="flatIndexOf(row) === selected"
+                  :data-selected="flatIndexOf(row) === selected"
+                  class="group/row flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors duration-100"
+                  :class="
+                    flatIndexOf(row) === selected
+                      ? 'bg-accent-bg text-fg'
+                      : 'text-fg-muted hover:bg-bg-subtle'
+                  "
+                  @mousemove="selectRow(flatIndexOf(row))"
+                  @click="row.perform()"
+                >
+                  <!-- Leading: thumbnail or icon tile -->
+                  <span
+                    v-if="row.image"
+                    class="relative h-9 w-9 shrink-0 overflow-hidden rounded-md bg-bg-subtle ring-1 ring-line"
                   >
-                    <!-- Leading: thumbnail or icon tile -->
-                    <span
-                      v-if="row.image"
-                      class="relative h-9 w-9 shrink-0 overflow-hidden rounded-md bg-bg-subtle ring-1 ring-line"
-                    >
-                      <img
-                        :src="row.image"
-                        :alt="''"
-                        loading="lazy"
-                        decoding="async"
-                        class="h-full w-full object-cover"
-                      />
-                    </span>
-                    <span
-                      v-else
-                      class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-bg-subtle ring-1 ring-line"
-                      :class="flatIndexOf(row) === selected ? 'text-accent' : 'text-fg-subtle'"
-                    >
-                      <AppIcon :name="(row.icon as any)" :size="16" />
-                    </span>
-
-                    <!-- Title (highlighted) + subtitle -->
-                    <span class="min-w-0 flex-1">
-                      <span class="block truncate">
-                        <template v-if="row.indices.length">
-                          <span
-                            v-for="(seg, i) in highlightSegments(row.title, row.indices)"
-                            :key="i"
-                            :class="seg.match ? 'match-hl' : ''"
-                          >{{ seg.text }}</span>
-                        </template>
-                        <template v-else>{{ row.title }}</template>
-                      </span>
-                      <span v-if="row.subtitle" class="block truncate text-xs text-fg-faint">
-                        {{ row.subtitle }}
-                      </span>
-                    </span>
-
-                    <!-- Hint / shortcut -->
-                    <span v-if="row.hint" class="shrink-0 font-mono text-2xs text-fg-faint">
-                      {{ row.hint }}
-                    </span>
-                    <AppIcon
-                      name="corner-down-left"
-                      :size="14"
-                      class="shrink-0 text-accent opacity-0 transition-opacity"
-                      :class="flatIndexOf(row) === selected ? 'opacity-100' : ''"
+                    <img
+                      :src="row.image"
+                      :alt="''"
+                      loading="lazy"
+                      decoding="async"
+                      class="h-full w-full object-cover"
                     />
-                  </li>
-                </ul>
-              </section>
-            </template>
+                  </span>
+                  <span
+                    v-else
+                    class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-bg-subtle ring-1 ring-line"
+                    :class="flatIndexOf(row) === selected ? 'text-accent' : 'text-fg-subtle'"
+                  >
+                    <AppIcon :name="(row.icon as any)" :size="16" />
+                  </span>
+
+                  <!-- Title (highlighted) + subtitle -->
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate">
+                      <template v-if="row.indices.length">
+                        <span
+                          v-for="(seg, i) in highlightSegments(row.title, row.indices)"
+                          :key="i"
+                          :class="seg.match ? 'match-hl' : ''"
+                        >{{ seg.text }}</span>
+                      </template>
+                      <template v-else>{{ row.title }}</template>
+                    </span>
+                    <span
+                      v-if="row.subtitle"
+                      class="block truncate text-xs"
+                      :class="flatIndexOf(row) === selected ? 'text-fg-muted' : 'text-fg-faint'"
+                    >
+                      {{ row.subtitle }}
+                    </span>
+                  </span>
+
+                  <!-- Hint / shortcut. On the selected row the background shifts
+                       to accent-bg, so faint ink dips under AA — lift it. -->
+                  <span
+                    v-if="row.hint"
+                    class="shrink-0 font-mono text-2xs"
+                    :class="flatIndexOf(row) === selected ? 'text-fg-muted' : 'text-fg-faint'"
+                  >
+                    {{ row.hint }}
+                  </span>
+                  <AppIcon
+                    name="corner-down-left"
+                    :size="14"
+                    class="shrink-0 text-accent opacity-0 transition-opacity"
+                    :class="flatIndexOf(row) === selected ? 'opacity-100' : ''"
+                  />
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Footer legend -->

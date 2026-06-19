@@ -149,7 +149,7 @@ const statuses = [
       </div>
       <p v-else-if="genresState === 'error'" class="text-xs text-fg-faint">
         Couldn’t load genres.
-        <button class="text-accent hover:underline" @click="loadGenres">Retry</button>
+        <button class="text-accent underline underline-offset-2" @click="loadGenres">Retry</button>
       </p>
       <div
         v-else
