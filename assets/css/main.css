@@ -1,0 +1,183 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Design tokens — single source of truth (read by Tailwind + hand CSS).
+
+   Surfaces are true neutral grays with a faint cool cast (a trace of blue, not
+   the SaaS-violet reflex). Steps are perceptually even, authored in OKLCH so
+   the elevation stack reads as light gaining, not hue shifting. The accent is
+   one electric indigo, reserved for focus, the active palette row, and a single
+   primary action per view (L1: accent ≤ 2×/screen).
+   ──────────────────────────────────────────────────────────────────────── */
+@layer base {
+  :root {
+    color-scheme: dark;
+
+    /* Surfaces — canvas → overlay. */
+    --bg: oklch(0.165 0.006 264);
+    --bg-subtle: oklch(0.195 0.006 264);
+    --panel: oklch(0.215 0.007 264);
+    --raised: oklch(0.255 0.008 264);
+    --overlay: oklch(0.225 0.008 264);
+
+    /* Hairlines. */
+    --line: oklch(0.3 0.008 264);
+    --line-strong: oklch(0.37 0.01 264);
+
+    /* Ink. */
+    --fg: oklch(0.97 0.004 264);
+    --fg-muted: oklch(0.8 0.006 264);
+    --fg-subtle: oklch(0.66 0.008 264);
+    --fg-faint: oklch(0.54 0.008 264);
+
+    /* Electric accent + roles. */
+    --accent: oklch(0.68 0.18 277);
+    --accent-hover: oklch(0.73 0.18 277);
+    --accent-fg: oklch(0.99 0.01 277);
+    --accent-bg: oklch(0.68 0.18 277 / 0.16);
+
+    /* Status. */
+    --positive: oklch(0.78 0.15 155);
+    --warn: oklch(0.8 0.14 75);
+
+    /* Geometry. */
+    --header-h: 52px;
+    --ease-house: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-bg text-fg-muted antialiased;
+    font-feature-settings: 'cv11', 'ss01', 'cv05';
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Consistent, architectural focus ring for keyboard users (L1: 2–3px, offset,
+     3:1 contrast, never bare outline:none). Pointer interactions don't trigger
+     :focus-visible, so this stays out of the way until the keyboard is used. */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    @apply outline-none;
+    box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+    border-radius: 6px;
+  }
+
+  ::selection {
+    background: var(--accent-bg);
+    color: var(--fg);
+  }
+
+  /* Thin, neutral scrollbars matching the product chrome. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--fg-faint);
+    background-clip: content-box;
+  }
+
+  /* prefers-reduced-motion: a real static fallback. All animation/transition
+     collapses; the spring palette open becomes an instant appearance. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .container-page {
+    @apply mx-auto w-full max-w-[1320px] px-4 sm:px-6 lg:px-8;
+  }
+
+  /* A keyboard key cap, monospace, used for ⌘K and inline shortcut hints. */
+  .kbd {
+    @apply inline-flex h-[1.35rem] min-w-[1.35rem] items-center justify-center rounded-[5px] px-1.5
+           font-mono text-[0.7rem] font-medium leading-none text-fg-subtle;
+    background: var(--bg-subtle);
+    border: 1px solid var(--line);
+    box-shadow: inset 0 -1px 0 var(--line);
+  }
+
+  /* Skeleton shimmer for loading states — opacity/transform only. */
+  .skeleton {
+    @apply relative overflow-hidden;
+    background: var(--bg-subtle);
+  }
+  .skeleton::after {
+    content: '';
+    @apply absolute inset-0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.045),
+      transparent
+    );
+    animation: shimmer 1.5s var(--ease-house) infinite;
+  }
+  @keyframes shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  /* Highlighted substring inside a fuzzy match. */
+  .match-hl {
+    @apply font-semibold text-fg;
+    background: var(--accent-bg);
+    border-radius: 3px;
+    padding: 0 1px;
+    margin: 0 -1px;
+  }
+}
+
+/* ── Route + panel transitions (one house curve) ─────────────────────────── */
+
+/* Page cross-fade. Reduced-motion collapses it via the global guard above. */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s var(--ease-house);
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* The right-hand detail drawer: slide + fade from the edge it lives on. */
+.drawer-enter-active {
+  transition:
+    transform 0.36s var(--ease-house),
+    opacity 0.36s var(--ease-house);
+}
+.drawer-leave-active {
+  transition:
+    transform 0.26s var(--ease-house),
+    opacity 0.26s var(--ease-house);
+}
+.drawer-enter-from,
+.drawer-leave-to {
+  transform: translateX(16px);
+  opacity: 0;
+}
