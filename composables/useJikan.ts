@@ -26,6 +26,15 @@ import type {
 const cache = new Map<string, unknown>()
 
 /**
+ * In-flight request de-duplication. When two surfaces ask for the same key
+ * before the first resolves (e.g. the home featured spotlight and the Top rail
+ * both hit /top/anime?page=1 on load), they share ONE network promise instead
+ * of racing two requests through the rate limiter — which is what inflated TTI
+ * with 429 refetch churn on the near-empty shell.
+ */
+const inflight = new Map<string, Promise<unknown>>()
+
+/**
  * Build a stable cache key from a path plus sorted, cleaned query params.
  * Pure and exported so the keying logic can be unit-tested in isolation.
  */
@@ -79,19 +88,40 @@ export function useJikan() {
     if (cache.has(key)) {
       return cache.get(key) as T
     }
+    // De-dup: if an identical request is already in flight, await it instead of
+    // issuing a second one.
+    const pending = inflight.get(key)
+    if (pending) return pending as Promise<T>
 
-    await scheduleSlot()
+    const run = (async () => {
+      await scheduleSlot()
 
-    const result = await $fetch<T>(`${base}${path}`, {
-      // $fetch serializes params and drops undefined values for us.
-      query: params,
-      retry: 1,
-      retryDelay: 600,
-      timeout: 12_000,
-    })
+      const result = await $fetch<T>(`${base}${path}`, {
+        // $fetch serializes params and drops undefined values for us.
+        query: params,
+        // Retry on transient/rate-limited failures with exponential backoff,
+        // honoring Retry-After when Jikan sends it. This keeps a 429 from
+        // turning into a tight refetch loop that inflates TTI.
+        retry: 3,
+        retryStatusCodes: [425, 429, 500, 502, 503, 504],
+        retryDelay: (ctx) => {
+          const ra = Number(ctx.response?.headers?.get('retry-after'))
+          if (Number.isFinite(ra) && ra > 0) return Math.min(ra * 1000, 5_000)
+          return 800
+        },
+        timeout: 12_000,
+      })
 
-    cache.set(key, result)
-    return result
+      cache.set(key, result)
+      return result
+    })()
+
+    inflight.set(key, run)
+    try {
+      return await run
+    } finally {
+      inflight.delete(key)
+    }
   }
 
   // ---------------------------------------------------------------------
