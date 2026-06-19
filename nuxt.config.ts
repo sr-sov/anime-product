@@ -44,11 +44,12 @@ export default defineNuxtConfig({
         { rel: 'icon', type: 'image/x-icon', href: '/anime-product/favicon.ico' },
         { rel: 'icon', type: 'image/svg+xml', href: '/anime-product/favicon.svg' },
         { rel: 'apple-touch-icon', href: '/anime-product/apple-touch-icon.png' },
-        // Inter, the product workhorse. Preconnect + preload the variable woff2
-        // so the font is ready at first paint — otherwise its late swap reflows
-        // the home content region (the mobile CLS source: a 0.179 shift caused
-        // by "Web font loaded"). A metric-adjusted fallback (main.css) covers
-        // the gap if the preload is slow, so text never reflows either way.
+        // Inter, the product workhorse. We self-declare its @font-face in
+        // main.css (font-display: optional) instead of loading rsms.me's CSS
+        // (font-display: swap), so the font never swaps in late and reflows the
+        // home content region — that was the mobile CLS source. Preconnect +
+        // preload the variable woff2 so `optional` usually wins and users get
+        // Inter; if not, the metric-matched fallback renders with no shift.
         { rel: 'preconnect', href: 'https://rsms.me/', crossorigin: '' },
         {
           rel: 'preload',
@@ -57,7 +58,6 @@ export default defineNuxtConfig({
           href: 'https://rsms.me/inter/font-files/InterVariable.woff2?v=4.1',
           crossorigin: '',
         },
-        { rel: 'stylesheet', href: 'https://rsms.me/inter/inter.css' },
       ],
     },
   },

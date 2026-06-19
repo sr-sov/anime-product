@@ -11,10 +11,24 @@
    one electric indigo, reserved for focus, the active palette row, and a single
    primary action per view (L1: accent ≤ 2×/screen).
    ──────────────────────────────────────────────────────────────────────── */
-/* Metric-adjusted fallback for Inter. Until InterVariable loads, text renders
-   in this Arial-derived face whose ascent/descent/size are overridden to match
-   Inter's box, so the eventual swap reflows nothing (kills the font-swap CLS on
-   the home content region). Listed before Inter in the Tailwind stack. */
+/* Inter — self-declared so we control font-display. The upstream rsms.me CSS
+   ships font-display: swap, which reflowed the home content region after first
+   paint (the mobile CLS source). We instead use font-display: optional: the
+   browser uses Inter only if it's ready within the brief block window (the
+   preload in nuxt.config usually makes it so), and otherwise keeps the
+   metric-matched fallback for the page's life — it NEVER swaps late, so CLS
+   stays 0 either way. Same cross-origin woff2 the preload warms. */
+@font-face {
+  font-family: 'InterVariable';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: optional;
+  src: url('https://rsms.me/inter/font-files/InterVariable.woff2?v=4.1') format('woff2');
+}
+
+/* Metric-adjusted fallback for Inter: Arial with ascent/descent/size overrides
+   matched to Inter's box, so if `optional` falls back, the layout is identical
+   (no reflow). Listed before Inter in the Tailwind stack. */
 @font-face {
   font-family: 'InterFallback';
   src: local('Arial');
@@ -67,7 +81,7 @@
   }
 
   body {
-    @apply bg-bg text-fg-muted antialiased;
+    @apply bg-bg font-sans text-fg-muted antialiased;
     font-feature-settings: 'cv11', 'ss01', 'cv05';
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
