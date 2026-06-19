@@ -5,7 +5,7 @@
  * featured spotlight and curated rails (Top, This season, optionally Recent).
  * Everything lands fast and is one keystroke from anywhere via ⌘K.
  */
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useJikan } from '~/composables/useJikan'
 import { useCommandPalette } from '~/composables/useCommandPalette'
@@ -22,10 +22,28 @@ const { score, year, compact } = useFormat()
 // Featured spotlight = the current #1 top title. Fetched hydration-safely so it
 // SERVER-RENDERS into the prerendered homepage HTML: no skeleton→content swap on
 // first paint (which was the mobile CLS source), and it doubles as the LCP hero.
-const { data: featured, pending: featuredPending, error: featuredError } = await useAsyncData(
-  'home-featured',
-  async () => (await getTopAnime(1)).data[0] ?? null,
+const { data: featured, pending: featuredPending, error: featuredError, refresh: refreshFeatured } =
+  await useAsyncData('home-featured', async () => (await getTopAnime(1)).data[0] ?? null)
+
+// If the build-time fetch was rate-limited (no featured baked), refetch on the
+// client so the skeleton resolves to the hero rather than freezing an error.
+const isClient = import.meta.client
+onMounted(() => {
+  if (!featured.value) refreshFeatured()
+})
+
+// Preload the hero cover (the LCP image) — its URL is known at SSR time, so
+// hinting it in <head> lets the browser fetch it during HTML parse rather than
+// after the image element is discovered. Improves the mobile LCP.
+const featuredCover = computed(
+  () => featured.value?.images?.webp?.large_image_url || featured.value?.images?.jpg?.large_image_url || '',
 )
+useHead({
+  link: () =>
+    featuredCover.value
+      ? [{ rel: 'preload', as: 'image', href: featuredCover.value, fetchpriority: 'high' }]
+      : [],
+})
 
 // Rail fetchers (each rail loads independently).
 const loadTop = async () => (await getTopAnime(1)).data
@@ -111,8 +129,10 @@ const featuredSynopsis = computed(() =>
           Featured · #1 right now
         </h2>
 
-        <!-- Loading -->
-        <div v-if="featuredPending && !featured" class="flex gap-5 rounded-2xl border border-line bg-panel p-5">
+        <!-- Loading. Also the SSR fallback when the build-time fetch was rate-
+             limited: ship the skeleton (hydrates + refetches), never a baked
+             error. -->
+        <div v-if="!featured && (featuredPending || !isClient)" class="flex gap-5 rounded-2xl border border-line bg-panel p-5">
           <div class="skeleton aspect-[3/4] w-32 shrink-0 rounded-lg sm:w-44" />
           <div class="flex-1 space-y-3 py-2">
             <div class="skeleton h-6 w-2/3 rounded" />
@@ -123,7 +143,8 @@ const featuredSynopsis = computed(() =>
           </div>
         </div>
 
-        <p v-else-if="featuredError || !featured" class="rounded-xl border border-dashed border-line px-4 py-8 text-sm text-fg-subtle">
+        <!-- Error — client-side only, after a confirmed failed (re)fetch. -->
+        <p v-else-if="!featured" class="rounded-xl border border-dashed border-line px-4 py-8 text-sm text-fg-subtle">
           Couldn’t load the featured title right now.
         </p>
 
@@ -135,10 +156,15 @@ const featuredSynopsis = computed(() =>
           @click="openFeatured"
         >
           <div class="relative aspect-[3/4] w-32 shrink-0 overflow-hidden rounded-lg border border-line-strong bg-bg-subtle shadow-panel sm:w-44">
+            <!-- The hero cover is the LCP element (above the fold, server-
+                 painted) — load it eagerly at high priority, never lazily. -->
             <img
               :src="featured.images?.webp?.large_image_url || featured.images?.jpg?.large_image_url || ''"
               :alt="`Cover art for ${featured.title}`"
-              loading="lazy"
+              fetchpriority="high"
+              decoding="async"
+              width="176"
+              height="235"
               class="h-full w-full object-cover transition-transform duration-500 ease-house group-hover:scale-[1.04]"
             />
           </div>

@@ -51,6 +51,11 @@ export default defineNuxtConfig({
         // preload the variable woff2 so `optional` usually wins and users get
         // Inter; if not, the metric-matched fallback renders with no shift.
         { rel: 'preconnect', href: 'https://rsms.me/', crossorigin: '' },
+        // Warm the connection to MAL's image CDN (covers) and the Jikan API so
+        // the first cover + first data request don't pay TLS setup on the
+        // critical path.
+        { rel: 'preconnect', href: 'https://cdn.myanimelist.net' },
+        { rel: 'dns-prefetch', href: 'https://api.jikan.moe' },
         {
           rel: 'preload',
           as: 'font',
@@ -144,6 +149,11 @@ export default defineNuxtConfig({
       }
       // eslint-disable-next-line no-console
       console.log(`[prerender] seeded ${added} /anime/<id> detail routes`)
+
+      // Cool down before prerendering starts so Jikan's rate window resets —
+      // otherwise the very first route (`/`, the homepage hero fetch) can land
+      // mid-throttle and bake a skeleton instead of the server-painted LCP hero.
+      await sleep(2500)
     },
   },
 
