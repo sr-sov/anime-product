@@ -10,7 +10,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useJikan } from '~/composables/useJikan'
 import { useCommandPalette } from '~/composables/useCommandPalette'
 import { useRecent } from '~/composables/useRecent'
-import { useFormat } from '~/composables/useFormat'
+import { useFormat, srcsetFrom } from '~/composables/useFormat'
 
 const router = useRouter()
 const route = useRoute()
@@ -38,10 +38,23 @@ onMounted(() => {
 const featuredCover = computed(
   () => featured.value?.images?.webp?.large_image_url || featured.value?.images?.jpg?.large_image_url || '',
 )
+const featuredSrcset = computed(
+  () => srcsetFrom(featured.value?.images?.webp) || srcsetFrom(featured.value?.images?.jpg) || '',
+)
 useHead({
   link: () =>
     featuredCover.value
-      ? [{ rel: 'preload', as: 'image', href: featuredCover.value, fetchpriority: 'high' }]
+      ? [
+          {
+            rel: 'preload',
+            as: 'image',
+            href: featuredCover.value,
+            // Match the <img> so the preload fetches the same responsive source.
+            imagesrcset: featuredSrcset.value || undefined,
+            imagesizes: featuredSrcset.value ? '(min-width:640px) 176px, 128px' : undefined,
+            fetchpriority: 'high',
+          },
+        ]
       : [],
 })
 
@@ -157,9 +170,13 @@ const featuredSynopsis = computed(() =>
         >
           <div class="relative aspect-[3/4] w-32 shrink-0 overflow-hidden rounded-lg border border-line-strong bg-bg-subtle shadow-panel sm:w-44">
             <!-- The hero cover is the LCP element (above the fold, server-
-                 painted) — load it eagerly at high priority, never lazily. -->
+                 painted) — load it eagerly at high priority, never lazily, and
+                 with a srcset so mobile pulls a ~176px-fit source instead of the
+                 425px large file (smaller LCP payload over throttled networks). -->
             <img
               :src="featured.images?.webp?.large_image_url || featured.images?.jpg?.large_image_url || ''"
+              :srcset="srcsetFrom(featured.images?.webp) || srcsetFrom(featured.images?.jpg)"
+              sizes="(min-width:640px) 176px, 128px"
               :alt="`Cover art for ${featured.title}`"
               fetchpriority="high"
               decoding="async"
