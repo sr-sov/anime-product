@@ -7,7 +7,7 @@ on:
 
 jobs:
   verify:
-    name: Typecheck & unit tests
+    name: Typecheck, unit tests, build & a11y gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,5 +23,23 @@ jobs:
       - name: Typecheck (strict)
         run: npm run typecheck
 
-      - name: Unit tests
+      - name: Unit tests (incl. fuzzy, recent, formatting)
         run: npm test
+
+      # Generate the static site so the deep-link + a11y gates run against the
+      # REAL prerendered output (not a dev server). The prerender contract test
+      # in `npm test` re-runs here against the fresh build.
+      - name: Generate static site
+        run: npm run generate
+
+      - name: Prerender / deep-link contract
+        run: npx vitest run test/prerender.test.ts
+
+      # Chrome for the headless a11y scan.
+      - name: Install Chrome for Testing
+        run: npx --yes @puppeteer/browsers install chrome@stable | tee /tmp/chrome.txt
+
+      - name: A11y gate — axe with the ⌘K palette OPEN (zero critical/serious)
+        run: |
+          export PUPPETEER_EXECUTABLE_PATH="$(awk '{print $NF}' /tmp/chrome.txt)"
+          npm run test:a11y

@@ -12,12 +12,16 @@
     "postinstall": "nuxt prepare",
     "typecheck": "nuxt typecheck",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:a11y": "node scripts/qa-axe-local.mjs",
+    "serve:static": "node scripts/static-serve.mjs"
   },
   "devDependencies": {
     "@nuxtjs/tailwindcss": "6.14.0",
     "@types/node": "^26.0.0",
+    "axe-core": "^4.12.1",
     "nuxt": "3.21.8",
+    "puppeteer-core": "^25.1.0",
     "typescript": "5.9.3",
     "vitest": "^4.1.9",
     "vue-tsc": "2.2.12"

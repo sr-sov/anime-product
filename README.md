@@ -6,8 +6,11 @@ fuzzy-search thousands of titles, jump to any genre, re-open what you just
 viewed, and run navigation commands — all with live debounced results and full
 arrow-key navigation. Titles open in a **route-aware detail drawer** over the
 current page, so you never lose your place. Data is the live
-[Jikan API](https://jikan.moe) (MyAnimeList), fetched client-side, so the whole
-app ships as a static site.
+[Jikan API](https://jikan.moe) (MyAnimeList). The homepage and the top ~40 detail
+routes are **server-rendered and prerendered** to static HTML (real deep-links,
+per-title SEO, a server-painted cover for fast LCP); the long tail hydrates the
+same way via the SPA fallback, so the whole app still ships as a static site to
+GitHub Pages.
 
 **Live:** https://sr-sov.github.io/anime-product/
 
@@ -43,7 +46,8 @@ detected at runtime.
 
 ## Stack
 
-- **Nuxt 3** (Vue 3, `<script setup>` + Composition API), SPA / static output
+- **Nuxt 3** (Vue 3, `<script setup>` + Composition API), SSR + SSG prerender to
+  static output (`ssr: true`, hydration-safe `useAsyncData`)
 - **TypeScript** in `strict` mode with a typed API surface
 - **TailwindCSS** with an OKLCH design-token system (single source of truth in
   `assets/css/main.css`, surfaced to both Tailwind and hand CSS)
@@ -74,10 +78,15 @@ detected at runtime.
   CLS), empty states that teach the space and offer the keyboard way out, and
   error states with a retry path — for the grid, every rail, the palette search,
   the drawer, and the detail page.
-- **Accessibility.** Real `combobox`/`listbox`/`option` roles with
-  `aria-activedescendant`, `aria-selected`, and `aria-pressed`; an architectural
-  2px offset focus ring (never bare `outline: none`); `alt` text; sufficient
-  contrast; and a genuine static fallback under `prefers-reduced-motion`.
+- **Accessibility, gated in CI.** The palette uses a valid
+  `combobox` → `listbox` → `group` → `option` ownership chain (each genre/anime
+  group is a labelled `role="group"`, options owned directly — no orphaned
+  options) with `aria-activedescendant`, `aria-selected`, and `aria-pressed`; an
+  architectural 2px offset focus ring (never bare `outline: none`); `alt` text;
+  WCAG-AA contrast on every ink/surface pair (faint ink and group headers
+  included); and a genuine static fallback under `prefers-reduced-motion`. A CI
+  step runs **axe-core against the site with the palette OPEN** and fails on any
+  critical/serious violation.
 
 ## Project structure
 
@@ -106,7 +115,12 @@ pages/
   browse.vue                   Instant-filter dense grid
   anime/[id].vue               Full standalone detail page
 app.vue · error.vue            Shell (mounts palette + drawer) + error boundary
-test/                          Vitest: fuzzy, recent, formatters, cache key, debounce
+nuxt.config.ts                 SSR + prerender:routes hook (seeds top ~40 detail routes)
+scripts/
+  static-serve.mjs             Serve .output/public at the prod base path (local QA)
+  qa-axe-local.mjs             In-process server + axe-core with the palette OPEN
+test/                          Vitest: fuzzy, recent, formatters, cache key, debounce,
+                               + prerender/deep-link build contract
 ```
 
 ## Run it
@@ -119,9 +133,11 @@ npm run dev          # http://localhost:3000
 Other scripts:
 
 ```bash
-npm test             # vitest run (unit tests)
+npm test             # vitest run (unit + prerender/deep-link contract)
 npm run typecheck    # nuxi typecheck (strict)
-npm run generate     # static build -> .output/public
+npm run generate     # SSR/SSG build -> .output/public
+npm run serve:static # serve .output/public at the prod base path (local QA)
+npm run test:a11y    # axe-core with the ⌘K palette OPEN (needs a built site)
 ```
 
 ## Testing & CI
@@ -138,22 +154,35 @@ Unit tests ([Vitest](https://vitest.dev)) cover the pure logic where bugs hide:
 - `test/cache-key.test.ts` — `buildCacheKey` stable ordering and param cleaning.
 - `test/useDebounce.test.ts` — debounce timing with fake timers.
 
-GitHub Actions (`.github/workflows/ci.yml`) runs the strict typecheck and the
-unit tests on every push and pull request.
+`test/prerender.test.ts` additionally asserts the build contract after
+`npm run generate`: the homepage ships the server-painted featured spotlight, the
+detail routes prerender as real deep-linkable pages (own `<title>`, cover, and
+`og:image`), no page bakes a hard error state, and the `404.html` SPA fallback
+exists.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs, on every push and pull request:
+strict typecheck → unit tests → `npm run generate` → the prerender/deep-link
+contract → an **axe-core a11y gate with the palette open** (fails on any
+critical/serious violation).
 
 ## Deploy (GitHub Pages)
 
 Configured for a GitHub Pages **project page**: `app.baseURL` is
 `/anime-product/` and Nitro uses the `github-pages` preset (emitting `.nojekyll`
-and a `404.html` SPA fallback). `npm run generate` produces a ready-to-publish
-`.output/public`, deployed to the `gh-pages` branch.
+and a `404.html` SPA fallback). With `ssr: true`, `npm run generate` server-
+renders and prerenders the homepage plus the top ~40 `/anime/<id>` detail routes
+(seeded at build time from `getTopAnime` via a `prerender:routes` hook, rendered
+one at a time to respect Jikan's rate limit), then ships a ready-to-publish
+static `.output/public` deployed to the `gh-pages` branch. `crawlLinks` stays off
+so the long tail stays SPA-fallback.
 
 ## Going further
 
 - **Nitro server-route proxy.** A `server/api/anime/[...].ts` proxy would move
-  rate-limiting and caching server-side, hide the upstream, and unlock SSR for
-  crawlable, fast-first-paint detail pages — the `useJikan` seam is already the
-  right place to swap the base.
+  rate-limiting and caching server-side and hide the upstream — the `useJikan`
+  seam is already the right place to swap the base. (Build-time prerendering of
+  the popular detail routes, with per-title SEO and a server-painted cover, is
+  already in place.)
 - **Palette command modes.** A `>` prefix for command-only mode and a `#` prefix
   to scope to genres (Raycast-style), plus per-result actions (open in new tab,
   copy link) on `⌘⏎`.
