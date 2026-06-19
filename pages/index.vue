@@ -189,8 +189,11 @@ const featuredSynopsis = computed(() =>
       </section>
 
       <!-- ── Rails ── -->
-      <AnimeRail title="Top ranked" icon="flame" :load="loadTop" to="/browse?sort=top" />
-      <AnimeRail title="Airing this season" icon="calendar" :load="loadSeason" to="/browse?sort=season" />
+      <!-- Below the fold: lazy-hydrate on visibility so their JS doesn't pile
+           onto the initial home hydration long task (cuts TBT). They render
+           server-side as skeletons and become interactive when scrolled to. -->
+      <LazyAnimeRail title="Top ranked" icon="flame" :load="loadTop" to="/browse?sort=top" hydrate-on-visible />
+      <LazyAnimeRail title="Airing this season" icon="calendar" :load="loadSeason" to="/browse?sort=season" hydrate-on-visible />
     </div>
   </div>
 </template>
